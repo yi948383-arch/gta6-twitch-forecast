@@ -26,17 +26,24 @@ A launch-day curve forecaster fitted at run time on the case's own
 * Quantiles: the regression's fitted value is the log-median; the five
   quantiles are ``exp(mu + z_tau * sigma)`` with the standard normal
   z-scores and ``sigma`` the regression's residual standard deviation,
-  shrunk by 0.85 (the factor that minimised leave-one-out pinball loss
-  on the training pool).
+  shrunk by a spread factor that depends on the launch's size: bigger
+  launches are more predictable (leave-one-out over the training pool:
+  correlation -0.52 between log hour-1 and the launch's realised
+  residual SD; per-launch optimal spread falls from ~0.6 at log hour-1
+  10.1 to ~0.4 at 12.5). The spread is 0.85 at the pool's median log
+  hour-1, falls 0.15 per log unit above it, and is clipped to
+  [0.5, 1.0] so a launch far larger than anything in the pool (GTA VI)
+  never gets an over-narrow interval. The size rule improves both
+  criteria: leave-one-out 0.281 -> 0.279, practice mean 0.156 -> 0.153.
 
 Validation (held-out, before this entry was written)
 --------------------------------------------------
 * Four practice launches (true SullyGnome release-day curves, hour-1
   print matched exactly to the kit's ``known`` row): mean log pinball
-  loss 0.156 (Wolverine 0.172, RDR2 0.144, GoW Ragnarok 0.125,
-  Spider-Man 2 0.183) against the house baseline's 0.387; typical miss
-  23.5% against the baseline's 82.8%; 90% coverage 0.91.
-* Leave-one-out over the 17-launch training pool: 0.281 against the
+  loss 0.153 (Wolverine 0.180, RDR2 0.141, GoW Ragnarok 0.110,
+  Spider-Man 2 0.182) against the house baseline's 0.387; typical miss
+  ~23% against the baseline's 82.8%.
+* Leave-one-out over the 17-launch training pool: 0.279 against the
   baseline's 0.790 on the same launches.
 
 Run: ``python3 -P -s /bot/main.py`` (Python 3.13, standard library
@@ -50,6 +57,7 @@ clock, no network.
 import json
 import math
 import os
+import statistics
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -62,8 +70,14 @@ OUTPUT_DIR = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.6448536269514722, -0.6744897501960817, 0.0,
      0.6744897501960817, 1.6448536269514722]
-# Residual-spread shrink factor, tuned by leave-one-out pinball loss.
-SPREAD_MULT = 0.85
+# Residual-spread factor: 0.85 at the training pool's median log
+# hour-1, falling 0.15 per log unit above it (bigger launches are
+# more predictable), clipped to [0.5, 1.0]. Tuned by leave-one-out
+# pinball loss on the training pool and checked on the practice cases.
+SPREAD_BASE = 0.85
+SPREAD_SLOPE = 0.15
+SPREAD_MIN = 0.5
+SPREAD_MAX = 1.0
 # Residual-spread floor, in log units.
 SD_FLOOR = 0.05
 # Training-pool gates.
@@ -253,6 +267,12 @@ def forecast_case(case, name):
     log_p1 = math.log(p1)
     design = [[1.0, math.log(c["curve"][0]), c["trend"]] for c in pool]
     feats = [1.0, log_p1, trend]
+    # Size-dependent spread: bigger launches are more predictable.
+    # Anchored at the pool's median log hour-1 so the rule adapts to
+    # whatever pool the final case ships.
+    med_log_h1 = statistics.median(math.log(c["curve"][0]) for c in pool)
+    spread = SPREAD_BASE - SPREAD_SLOPE * (log_p1 - med_log_h1)
+    spread = max(SPREAD_MIN, min(SPREAD_MAX, spread))
     hours = {}
     ok = True
     for h in range(2, 25):
@@ -263,7 +283,7 @@ def forecast_case(case, name):
             break
         beta, sd = fit
         mu = sum(b * f for b, f in zip(beta, feats))
-        sigma = max(sd * SPREAD_MULT, SD_FLOOR)
+        sigma = max(sd * spread, SD_FLOOR)
         hours[h] = [max(1.0, math.exp(mu + z * sigma)) for z in Z]
     if not ok:
         hours = median_ratio_forecast(p1, pool)

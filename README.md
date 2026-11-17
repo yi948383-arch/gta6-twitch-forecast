@@ -41,8 +41,15 @@ A launch-day curve forecaster fitted at run time on the case's own
    `b1 < 1` throughout: a bigger hour 1 means a flatter day.
 3. **Quantiles** — the fitted value is the log-median; the five quantiles
    are `exp(mu + z_tau · sigma)` with standard-normal z-scores and
-   `sigma` the regression's residual SD shrunk by 0.85 (tuned by
-   leave-one-out pinball loss).
+   `sigma` the regression's residual SD shrunk by a size-dependent
+   spread factor: 0.85 at the training pool's median log hour-1,
+   falling 0.15 per log unit above it, clipped to [0.5, 1.0]. Bigger
+   launches are more predictable — leave-one-out over the training
+   pool gives correlation −0.52 between log hour-1 and a launch's
+   realised residual SD, and per-launch optimal spread falls from
+   ~0.6 to ~0.4 as log hour-1 rises from 10.1 to 12.5. The clip keeps
+   a launch far larger than anything in the pool (GTA VI) from getting
+   an over-narrow interval.
 
 Fallbacks keep every case valid: looser training gates, then an
 empirical median-ratio forecast, then the house persistence baseline.
@@ -54,15 +61,18 @@ curves; hour-1 prints matched exactly to the kit's `known` rows):
 
 | launch | this entry | house baseline |
 |---|---|---|
-| Marvel's Wolverine | 0.172 | 0.744 |
-| Red Dead Redemption 2 | 0.144 | 0.287 |
-| God of War Ragnarök | 0.125 | 0.215 |
-| Marvel's Spider-Man 2 | 0.183 | 0.303 |
-| **mean** | **0.156** | **0.387** |
+| Marvel's Wolverine | 0.180 | 0.744 |
+| Red Dead Redemption 2 | 0.141 | 0.287 |
+| God of War Ragnarök | 0.110 | 0.215 |
+| Marvel's Spider-Man 2 | 0.182 | 0.303 |
+| **mean** | **0.153** | **0.387** |
 
-Mean log pinball loss 0.156 vs the baseline's 0.387 (−60%); typical miss
-23.5% vs 82.8%; 90% coverage 0.91. Leave-one-out over the training pool:
-0.281 vs the baseline's 0.790 on the same launches.
+Mean log pinball loss 0.153 vs the baseline's 0.387 (−60%); typical miss
+23.4% vs 82.8%; 90% coverage 0.91. Leave-one-out over the training pool:
+0.279 vs the baseline's 0.424 on the same launches. (An earlier draft
+quoted the LOO baseline as 0.790; that was a scoring error in the notes
+— the kit's persistence baseline, re-scored by two independent scripts,
+is 0.424 on those launches.)
 
 ## Files
 
